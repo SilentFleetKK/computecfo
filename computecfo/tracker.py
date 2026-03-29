@@ -31,6 +31,7 @@ class CostTracker:
                 model TEXT NOT NULL,
                 module TEXT DEFAULT '',
                 action TEXT DEFAULT '',
+                project TEXT DEFAULT '',
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
                 total_tokens INTEGER DEFAULT 0,
@@ -44,17 +45,24 @@ class CostTracker:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage(timestamp)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_module ON usage(module)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_model ON usage(model)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_project ON usage(project)")
+        # Migration: add project column to existing databases
+        try:
+            conn.execute("ALTER TABLE usage ADD COLUMN project TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         conn.commit()
         conn.close()
 
     def record(self, model: str, input_tokens: int, output_tokens: int,
-               module: str = "", action: str = "", cached: bool = False,
-               metadata: dict = None) -> UsageRecord:
+               module: str = "", action: str = "", project: str = "",
+               cached: bool = False, metadata: dict = None) -> UsageRecord:
         """Record a single API call."""
         record = UsageRecord(
             model=model,
             module=module,
             action=action,
+            project=project,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached=cached,
@@ -63,10 +71,10 @@ class CostTracker:
 
         conn = sqlite3.connect(str(self.db_path))
         conn.execute(
-            """INSERT INTO usage (id, model, module, action, input_tokens, output_tokens,
+            """INSERT INTO usage (id, model, module, action, project, input_tokens, output_tokens,
                total_tokens, cost_usd, tier, cached, timestamp, metadata)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (record.id, record.model, record.module, record.action,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (record.id, record.model, record.module, record.action, record.project,
              record.input_tokens, record.output_tokens, record.total_tokens,
              record.cost_usd, record.tier, int(record.cached),
              record.timestamp.isoformat(), json.dumps(record.metadata))
@@ -74,20 +82,32 @@ class CostTracker:
         conn.commit()
         conn.close()
 
-        log.info(f"Recorded: {model} | {module}/{action} | "
+        log.info(f"Recorded: {model} | {project}/{module}/{action} | "
                  f"{input_tokens}+{output_tokens} tokens | ${record.cost_usd:.4f}")
         return record
 
     # ─── Query Methods ───
+    # All query methods accept optional `project` param for independent accounting.
 
-    def get_summary(self, days: int = None) -> dict:
-        """Get cost summary. days=None for all-time, 1 for today, 7 for week, 30 for month."""
-        conn = sqlite3.connect(str(self.db_path))
-
-        where = ""
+    @staticmethod
+    def _build_where(days: int = None, project: str = "") -> tuple[str, list]:
+        """Build parameterized WHERE clause. Returns (sql_fragment, params)."""
+        conditions = []
+        params = []
         if days:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            where = f"WHERE timestamp >= '{cutoff}'"
+            conditions.append("timestamp >= ?")
+            params.append(cutoff)
+        if project:
+            conditions.append("project = ?")
+            params.append(project)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where, params
+
+    def get_summary(self, days: int = None, project: str = "") -> dict:
+        """Get cost summary. days=None for all-time, 1 for today, 7 for week, 30 for month."""
+        conn = sqlite3.connect(str(self.db_path))
+        where, params = self._build_where(days, project)
 
         row = conn.execute(f"""
             SELECT COALESCE(SUM(cost_usd), 0),
@@ -96,10 +116,10 @@ class CostTracker:
                    COALESCE(SUM(total_tokens), 0),
                    COUNT(*)
             FROM usage {where}
-        """).fetchone()
+        """, params).fetchone()
 
         conn.close()
-        return {
+        result = {
             "cost": round(row[0], 4),
             "input_tokens": row[1],
             "output_tokens": row[2],
@@ -107,71 +127,91 @@ class CostTracker:
             "calls": row[4],
             "period_days": days or "all",
         }
+        if project:
+            result["project"] = project
+        return result
 
-    def get_today(self) -> dict:
-        return self.get_summary(days=1)
+    def get_today(self, project: str = "") -> dict:
+        return self.get_summary(days=1, project=project)
 
-    def get_this_week(self) -> dict:
-        return self.get_summary(days=7)
+    def get_this_week(self, project: str = "") -> dict:
+        return self.get_summary(days=7, project=project)
 
-    def get_this_month(self) -> dict:
-        return self.get_summary(days=30)
+    def get_this_month(self, project: str = "") -> dict:
+        return self.get_summary(days=30, project=project)
 
-    def get_by_module(self, days: int = 30) -> list[dict]:
+    def get_by_module(self, days: int = 30, project: str = "") -> list[dict]:
         """Cost breakdown by module."""
         conn = sqlite3.connect(str(self.db_path))
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        rows = conn.execute("""
+        where, params = self._build_where(days, project)
+        rows = conn.execute(f"""
             SELECT module, SUM(cost_usd), SUM(total_tokens), COUNT(*)
-            FROM usage WHERE timestamp >= ? GROUP BY module ORDER BY SUM(cost_usd) DESC
-        """, (cutoff,)).fetchall()
+            FROM usage {where} GROUP BY module ORDER BY SUM(cost_usd) DESC
+        """, params).fetchall()
         conn.close()
         return [{"module": r[0] or "unknown", "cost": round(r[1], 4), "tokens": r[2], "calls": r[3]} for r in rows]
 
-    def get_by_model(self, days: int = 30) -> list[dict]:
+    def get_by_model(self, days: int = 30, project: str = "") -> list[dict]:
         """Cost breakdown by model."""
         conn = sqlite3.connect(str(self.db_path))
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        rows = conn.execute("""
+        where, params = self._build_where(days, project)
+        rows = conn.execute(f"""
             SELECT model, SUM(cost_usd), SUM(total_tokens), COUNT(*)
-            FROM usage WHERE timestamp >= ? GROUP BY model ORDER BY SUM(cost_usd) DESC
-        """, (cutoff,)).fetchall()
+            FROM usage {where} GROUP BY model ORDER BY SUM(cost_usd) DESC
+        """, params).fetchall()
         conn.close()
         return [{"model": r[0], "cost": round(r[1], 4), "tokens": r[2], "calls": r[3]} for r in rows]
 
-    def get_daily_trend(self, days: int = 30) -> list[dict]:
-        """Daily cost trend for charting."""
+    def get_by_project(self, days: int = 30) -> list[dict]:
+        """Cost breakdown by project — Alphabet-style independent accounting."""
         conn = sqlite3.connect(str(self.db_path))
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         rows = conn.execute("""
-            SELECT DATE(timestamp) as day, SUM(cost_usd), SUM(total_tokens), COUNT(*)
-            FROM usage WHERE timestamp >= ?
-            GROUP BY DATE(timestamp) ORDER BY day
+            SELECT project, SUM(cost_usd), SUM(total_tokens), COUNT(*)
+            FROM usage WHERE timestamp >= ? GROUP BY project ORDER BY SUM(cost_usd) DESC
         """, (cutoff,)).fetchall()
+        conn.close()
+        return [{"project": r[0] or "default", "cost": round(r[1], 4), "tokens": r[2], "calls": r[3]} for r in rows]
+
+    def get_daily_trend(self, days: int = 30, project: str = "") -> list[dict]:
+        """Daily cost trend for charting."""
+        conn = sqlite3.connect(str(self.db_path))
+        where, params = self._build_where(days, project)
+        rows = conn.execute(f"""
+            SELECT DATE(timestamp) as day, SUM(cost_usd), SUM(total_tokens), COUNT(*)
+            FROM usage {where}
+            GROUP BY DATE(timestamp) ORDER BY day
+        """, params).fetchall()
         conn.close()
         return [{"date": r[0], "cost": round(r[1], 4), "tokens": r[2], "calls": r[3]} for r in rows]
 
-    def get_recent(self, limit: int = 20) -> list[dict]:
+    def get_recent(self, limit: int = 20, project: str = "") -> list[dict]:
         """Most recent API calls."""
         conn = sqlite3.connect(str(self.db_path))
-        rows = conn.execute("""
-            SELECT id, model, module, action, input_tokens, output_tokens,
+        params = []
+        where = ""
+        if project:
+            where = "WHERE project = ?"
+            params.append(project)
+        params.append(limit)
+        rows = conn.execute(f"""
+            SELECT id, model, module, action, project, input_tokens, output_tokens,
                    total_tokens, cost_usd, tier, cached, timestamp
-            FROM usage ORDER BY timestamp DESC LIMIT ?
-        """, (limit,)).fetchall()
+            FROM usage {where} ORDER BY timestamp DESC LIMIT ?
+        """, params).fetchall()
         conn.close()
         return [{
             "id": r[0], "model": r[1], "module": r[2], "action": r[3],
-            "input_tokens": r[4], "output_tokens": r[5], "total_tokens": r[6],
-            "cost_usd": round(r[7], 6), "tier": r[8], "cached": bool(r[9]),
-            "timestamp": r[10],
+            "project": r[4], "input_tokens": r[5], "output_tokens": r[6],
+            "total_tokens": r[7], "cost_usd": round(r[8], 6), "tier": r[9],
+            "cached": bool(r[10]), "timestamp": r[11],
         } for r in rows]
 
-    def get_projected_monthly(self) -> float:
+    def get_projected_monthly(self, project: str = "") -> float:
         """Project monthly cost based on current spending rate."""
-        today_data = self.get_today()
+        today_data = self.get_today(project=project)
         if today_data["calls"] == 0:
-            week_data = self.get_this_week()
+            week_data = self.get_this_week(project=project)
             daily_avg = week_data["cost"] / max(week_data["period_days"], 1)
         else:
             daily_avg = today_data["cost"]

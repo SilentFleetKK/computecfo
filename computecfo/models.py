@@ -53,6 +53,7 @@ class UsageRecord:
     model: str = ""
     module: str = ""          # which feature used it (e.g. "generation", "analysis")
     action: str = ""          # specific action (e.g. "summarize", "translate")
+    project: str = ""         # project/tenant for independent accounting
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
@@ -75,6 +76,7 @@ class UsageRecord:
             "model": self.model,
             "module": self.module,
             "action": self.action,
+            "project": self.project,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
@@ -83,6 +85,16 @@ class UsageRecord:
             "cached": self.cached,
             "timestamp": self.timestamp.isoformat(),
         }
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate token count from text (heuristic: ~4 chars per token for English, ~2 for CJK)."""
+    if not text:
+        return 0
+    # Count CJK characters (they use more tokens per character)
+    cjk_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3000' <= c <= '\u303f')
+    ascii_count = len(text) - cjk_count
+    return int(ascii_count / 4 + cjk_count / 1.5)
 
 
 @dataclass

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="computecfo",
-    version="1.0.0",
+    version="1.1.0",
     description="Your AI Financial Officer — Track, analyze, and optimize LLM API spending",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

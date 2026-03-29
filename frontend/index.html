@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ComputeCFO — AI Financial Officer</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <!-- ─── Sidebar ─── -->
+  <nav class="sidebar">
+    <div class="logo">
+      <span class="logo-icon">🏦</span>
+      <h1>ComputeCFO</h1>
+      <span class="version">v1.1.0</span>
+    </div>
+    <ul class="nav-links">
+      <li class="active" data-section="overview"><span class="nav-icon">📊</span> <span data-i18n="nav_overview">Overview</span></li>
+      <li data-section="budget"><span class="nav-icon">🚨</span> <span data-i18n="nav_budget">Budget</span></li>
+      <li data-section="models"><span class="nav-icon">🤖</span> <span data-i18n="nav_models">Models</span></li>
+      <li data-section="projects"><span class="nav-icon">🏢</span> <span data-i18n="nav_projects">Projects</span></li>
+      <li data-section="anomalies"><span class="nav-icon">🔍</span> <span data-i18n="nav_anomalies">Anomalies</span></li>
+      <li data-section="estimator"><span class="nav-icon">🧮</span> <span data-i18n="nav_estimator">Estimator</span></li>
+      <li data-section="activity"><span class="nav-icon">📋</span> <span data-i18n="nav_activity">Activity</span></li>
+    </ul>
+    <div class="sidebar-footer">
+      <div class="toggle-row">
+        <button class="toggle-btn" id="theme-toggle" title="Light/Dark">
+          <span class="toggle-icon" id="theme-icon">☀️</span>
+        </button>
+        <button class="toggle-btn" id="lang-toggle" title="中/EN">
+          <span class="toggle-icon">中</span>
+        </button>
+      </div>
+      <div class="refresh-hint" data-i18n="refresh_hint">Auto-refreshes every 30s</div>
+    </div>
+  </nav>
+
+  <!-- ─── Main Content ─── -->
+  <main class="content">
+
+    <!-- ─── Overview Section ─── -->
+    <section id="overview" class="section active">
+      <div class="section-header">
+        <h2 data-i18n="title_overview">Financial Overview</h2>
+        <div class="header-actions">
+          <select id="project-filter" class="select-input">
+            <option value="" data-i18n="all_projects">All Projects</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="cards-row">
+        <div class="card accent-blue">
+          <div class="card-label" data-i18n="today">Today</div>
+          <div class="card-value" id="today-cost">$0.00</div>
+          <div class="card-sub" id="today-calls">0 calls</div>
+        </div>
+        <div class="card accent-purple">
+          <div class="card-label" data-i18n="this_week">This Week</div>
+          <div class="card-value" id="week-cost">$0.00</div>
+          <div class="card-sub" id="week-calls">0 calls</div>
+        </div>
+        <div class="card accent-green">
+          <div class="card-label" data-i18n="this_month">This Month</div>
+          <div class="card-value" id="month-cost">$0.00</div>
+          <div class="card-sub" id="month-calls">0 calls</div>
+        </div>
+        <div class="card accent-orange">
+          <div class="card-label" data-i18n="projected_monthly">Projected Monthly</div>
+          <div class="card-value" id="projected-cost">$0.00</div>
+          <div class="card-sub" id="projected-direction">—</div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="charts-row">
+        <div class="chart-card wide">
+          <h3 data-i18n="daily_trend">Daily Spending Trend</h3>
+          <canvas id="trend-chart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3 data-i18n="cost_by_model">Cost by Model</h3>
+          <canvas id="model-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Efficiency + Suggestions -->
+      <div class="charts-row">
+        <div class="chart-card">
+          <h3 data-i18n="efficiency_score">Efficiency Score</h3>
+          <div class="efficiency-display">
+            <div class="score-ring" id="efficiency-ring">
+              <svg viewBox="0 0 120 120">
+                <circle class="ring-bg" cx="60" cy="60" r="52"/>
+                <circle class="ring-fill" cx="60" cy="60" r="52" id="ring-fill"/>
+              </svg>
+              <div class="score-text">
+                <span class="score-number" id="efficiency-score">—</span>
+                <span class="score-grade" id="efficiency-grade"></span>
+              </div>
+            </div>
+            <ul class="deductions-list" id="efficiency-deductions"></ul>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h3 data-i18n="savings_suggestions">Savings Suggestions</h3>
+          <div class="suggestions-list" id="suggestions-list">
+            <div class="empty-state">Loading...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Budget Section ─── -->
+    <section id="budget" class="section">
+      <div class="section-header"><h2 data-i18n="title_budget">Budget Controls</h2></div>
+      <div class="budget-grid" id="budget-grid"></div>
+    </section>
+
+    <!-- ─── Models Section ─── -->
+    <section id="models" class="section">
+      <div class="section-header"><h2 data-i18n="title_models">Model Value Scores</h2>
+        <p class="section-subtitle" data-i18n="subtitle_models">Graham-inspired value analysis — find the "undervalued" models</p>
+      </div>
+      <div class="table-container">
+        <table class="data-table" id="model-value-table">
+          <thead>
+            <tr>
+              <th data-i18n="th_model">Model</th>
+              <th data-i18n="th_tier">Tier</th>
+              <th data-i18n="th_value_score">Value Score</th>
+              <th data-i18n="th_grade">Grade</th>
+              <th data-i18n="th_cost_1k">Cost/1K Tokens</th>
+              <th data-i18n="th_total_spent">Total Spent</th>
+              <th data-i18n="th_calls">Calls</th>
+              <th data-i18n="th_recommendation">Recommendation</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ─── Projects Section ─── -->
+    <section id="projects" class="section">
+      <div class="section-header"><h2 data-i18n="title_projects">Project Accounting</h2>
+        <p class="section-subtitle" data-i18n="subtitle_projects">Alphabet-style independent cost tracking per project</p>
+      </div>
+      <div class="charts-row">
+        <div class="chart-card">
+          <h3 data-i18n="cost_by_project">Cost by Project</h3>
+          <canvas id="project-chart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3 data-i18n="project_breakdown">Project Breakdown</h3>
+          <div class="table-container">
+            <table class="data-table" id="project-table">
+              <thead><tr><th data-i18n="th_project">Project</th><th data-i18n="th_cost">Cost</th><th data-i18n="th_tokens">Tokens</th><th data-i18n="th_calls">Calls</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Anomalies Section ─── -->
+    <section id="anomalies" class="section">
+      <div class="section-header"><h2 data-i18n="title_anomalies">Anomaly Detection</h2>
+        <p class="section-subtitle" data-i18n="subtitle_anomalies">"Mr. Market" alarm — detect irrational spending patterns</p>
+      </div>
+      <div class="anomalies-list" id="anomalies-list"></div>
+    </section>
+
+    <!-- ─── Estimator Section ─── -->
+    <section id="estimator" class="section">
+      <div class="section-header"><h2 data-i18n="title_estimator">Pre-Call Cost Estimator</h2>
+        <p class="section-subtitle" data-i18n="subtitle_estimator">Know the cost before you spend — Margin of Safety</p>
+      </div>
+      <div class="estimator-card">
+        <div class="estimator-form">
+          <div class="form-group">
+            <label data-i18n="est_model">Model</label>
+            <select id="est-model" class="select-input">
+              <option value="claude-opus-4-20250514">Claude Opus 4</option>
+              <option value="claude-sonnet-4-20250514" selected>Claude Sonnet 4</option>
+              <option value="claude-haiku-3.5">Claude Haiku 3.5</option>
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="gpt-4o-mini">GPT-4o-mini</option>
+              <option value="gpt-4.1">GPT-4.1</option>
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="deepseek-v3">DeepSeek V3</option>
+              <option value="deepseek-r1">DeepSeek R1</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label data-i18n="est_prompt_label">Prompt (or paste text to estimate)</label>
+            <textarea id="est-prompt" class="text-input" rows="4" data-i18n-placeholder="est_prompt_placeholder" placeholder="Paste your prompt here to estimate cost..."></textarea>
+          </div>
+          <div class="form-group">
+            <label data-i18n="est_token_label">Or specify token count directly</label>
+            <input type="number" id="est-tokens" class="text-input" placeholder="e.g. 2000" value="0">
+          </div>
+          <button class="btn-primary" id="est-btn" data-i18n="est_button">Estimate Cost</button>
+        </div>
+        <div class="estimator-result" id="est-result" style="display:none">
+          <div class="est-row"><span data-i18n="est_model">Model</span><strong id="est-r-model"></strong></div>
+          <div class="est-row"><span data-i18n="est_input_tokens">Input Tokens (est.)</span><strong id="est-r-input"></strong></div>
+          <div class="est-row"><span data-i18n="est_output_tokens">Output Tokens (est.)</span><strong id="est-r-output"></strong></div>
+          <div class="est-row highlight"><span data-i18n="est_cost">Estimated Cost</span><strong id="est-r-cost"></strong></div>
+          <div class="est-row"><span data-i18n="est_remaining">Budget Remaining</span><strong id="est-r-remaining"></strong></div>
+          <div class="est-row" id="est-r-alt-row" style="display:none">
+            <span data-i18n="est_cheaper">Cheaper Alternative</span>
+            <strong id="est-r-alt"></strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Activity Section ─── -->
+    <section id="activity" class="section">
+      <div class="section-header"><h2 data-i18n="title_activity">Recent Activity</h2></div>
+      <div class="table-container">
+        <table class="data-table" id="activity-table">
+          <thead>
+            <tr>
+              <th data-i18n="th_time">Time</th>
+              <th data-i18n="th_model">Model</th>
+              <th data-i18n="th_project">Project</th>
+              <th data-i18n="th_module">Module</th>
+              <th data-i18n="th_action">Action</th>
+              <th data-i18n="th_tokens">Tokens</th>
+              <th data-i18n="th_cost">Cost</th>
+              <th data-i18n="th_tier">Tier</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

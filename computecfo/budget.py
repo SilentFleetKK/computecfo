@@ -4,7 +4,7 @@ Prevents runaway API costs with multi-level protection.
 """
 import logging
 from typing import Optional, Callable
-from .models import BudgetConfig, calc_cost, get_model_tier
+from .models import BudgetConfig, calc_cost, get_model_tier, estimate_tokens
 from .tracker import CostTracker
 
 log = logging.getLogger("computecfo")
@@ -138,6 +138,56 @@ class BudgetManager:
             "downgraded_calls": downgraded_count,
             "estimated_saved_usd": round(estimated_saved, 4),
             "total_calls_analyzed": len(recent),
+        }
+
+    # ─── P1 #12: Pre-call Cost Estimation ───
+
+    def estimate_call_cost(self, model: str, prompt: str = "",
+                           estimated_input_tokens: int = 0,
+                           estimated_output_ratio: float = 0.5) -> dict:
+        """
+        Estimate cost before making an API call.
+
+        Args:
+            model: Model to use
+            prompt: Input prompt text (used to estimate input tokens if estimated_input_tokens=0)
+            estimated_input_tokens: Direct token count (overrides prompt-based estimate)
+            estimated_output_ratio: Expected output/input token ratio (default 0.5)
+        """
+        if estimated_input_tokens > 0:
+            input_t = estimated_input_tokens
+        elif prompt:
+            input_t = estimate_tokens(prompt)
+        else:
+            input_t = 1000  # fallback default
+
+        output_t = int(input_t * estimated_output_ratio)
+        cost = calc_cost(model, input_t, output_t)
+
+        # Check against remaining budget
+        daily = self.check_budget("daily")
+        will_exceed = (daily["spent"] + cost) > daily["limit"]
+
+        # Suggest cheaper alternative if cost is high
+        suggestion = None
+        if will_exceed and model in self.config.downgrade_map:
+            cheaper = self.config.downgrade_map[model]
+            cheaper_cost = calc_cost(cheaper, input_t, output_t)
+            suggestion = {
+                "model": cheaper,
+                "estimated_cost": round(cheaper_cost, 6),
+                "savings": round(cost - cheaper_cost, 6),
+                "will_exceed_budget": (daily["spent"] + cheaper_cost) > daily["limit"],
+            }
+
+        return {
+            "model": model,
+            "estimated_input_tokens": input_t,
+            "estimated_output_tokens": output_t,
+            "estimated_cost": round(cost, 6),
+            "budget_remaining": daily["remaining"],
+            "will_exceed_budget": will_exceed,
+            "cheaper_alternative": suggestion,
         }
 
     # ─── Default callbacks ───

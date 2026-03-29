@@ -1,10 +1,12 @@
 """
-📊 CostAnalyzer — ROI analysis, smart savings, and cost prediction.
+📊 CostAnalyzer — ROI analysis, smart savings, cost prediction,
+   model value scoring, and anomaly detection.
 """
 import logging
+import math
 from datetime import datetime, timezone, timedelta
 from .tracker import CostTracker
-from .models import MODEL_PRICING, get_model_tier
+from .models import MODEL_PRICING, get_model_tier, calc_cost
 
 log = logging.getLogger("computecfo")
 
@@ -181,6 +183,164 @@ class CostAnalyzer:
             "total_calls": month["calls"],
         }
 
+    # ─── P0 #4: Model Value Scoring ───
+
+    def get_model_value_scores(self, days: int = 30) -> list[dict]:
+        """
+        Calculate value-for-money score for each model used.
+        Inspired by Graham's intrinsic value — find the "undervalued" models.
+
+        Score = normalized inverse of cost-per-token, benchmarked against peers
+        in the same tier. Higher score = better value.
+        """
+        by_model = self.tracker.get_by_model(days)
+        if not by_model:
+            return []
+
+        # Build per-model stats
+        scored = []
+        for m in by_model:
+            if m["tokens"] == 0:
+                continue
+            cost_per_1k = m["cost"] / m["tokens"] * 1000
+            tier = get_model_tier(m["model"])
+
+            # Find cheapest alternative in same tier
+            tier_peers = [
+                (name, p) for name, p in MODEL_PRICING.items()
+                if name != "default" and get_model_tier(name) == tier and name != m["model"]
+            ]
+            cheapest_peer_cost = None
+            cheapest_peer_name = None
+            if tier_peers:
+                cheapest_peer_name, cheapest_peer = min(
+                    tier_peers, key=lambda x: (x[1]["input"] + x[1]["output"]) / 2
+                )
+                cheapest_peer_cost = (cheapest_peer["input"] + cheapest_peer["output"]) / 2 / 1000
+
+            # Value score: 100 if cheapest in tier, lower as cost increases
+            pricing = MODEL_PRICING.get(m["model"], MODEL_PRICING["default"])
+            model_avg_cost = (pricing["input"] + pricing["output"]) / 2 / 1000
+            if cheapest_peer_cost and cheapest_peer_cost > 0:
+                ratio = cheapest_peer_cost / model_avg_cost  # <1 means model is more expensive
+                value_score = min(100, int(ratio * 100))
+            else:
+                value_score = 80  # no peers to compare
+
+            recommendation = ""
+            if value_score < 40:
+                recommendation = (
+                    f"Consider switching to '{cheapest_peer_name}' for non-critical tasks. "
+                    f"Potential {int((1 - ratio) * 100)}% cost reduction in this tier."
+                )
+            elif value_score < 70:
+                recommendation = f"Acceptable value. '{cheapest_peer_name}' is cheaper if quality allows."
+
+            scored.append({
+                "model": m["model"],
+                "tier": tier,
+                "cost_per_1k_tokens": round(cost_per_1k, 6),
+                "total_spent": round(m["cost"], 4),
+                "calls": m["calls"],
+                "value_score": value_score,
+                "grade": "A" if value_score >= 90 else "B" if value_score >= 70 else "C" if value_score >= 50 else "D" if value_score >= 30 else "F",
+                "cheapest_alternative": cheapest_peer_name,
+                "recommendation": recommendation,
+            })
+
+        scored.sort(key=lambda x: x["value_score"], reverse=True)
+        return scored
+
+    # ─── P1 #6: Anomaly Detection ───
+
+    def detect_anomalies(self, days: int = 14, z_threshold: float = 2.0) -> list[dict]:
+        """
+        Detect abnormal spending patterns — the "Mr. Market" alarm.
+        Uses Z-score on daily costs + pattern-based heuristics.
+        """
+        anomalies = []
+        trend = self.tracker.get_daily_trend(days)
+
+        if len(trend) < 5:
+            return [{"type": "insufficient_data", "message": "Need at least 5 days of data"}]
+
+        costs = [d["cost"] for d in trend]
+        mean = sum(costs) / len(costs)
+        variance = sum((c - mean) ** 2 for c in costs) / len(costs)
+        std = math.sqrt(variance) if variance > 0 else 0.001
+
+        # 1. Daily spending spikes (Z-score)
+        for d in trend:
+            z = (d["cost"] - mean) / std
+            if z > z_threshold:
+                anomalies.append({
+                    "type": "spending_spike",
+                    "severity": "high" if z > 3 else "medium",
+                    "date": d["date"],
+                    "cost": round(d["cost"], 4),
+                    "z_score": round(z, 2),
+                    "daily_average": round(mean, 4),
+                    "message": f"${d['cost']:.2f} on {d['date']} — {z:.1f}x std dev above mean ${mean:.2f}",
+                })
+
+        # 2. Model concentration risk (over-reliance on single model)
+        by_model = self.tracker.get_by_model(days)
+        total_cost = sum(m["cost"] for m in by_model)
+        if total_cost > 0:
+            for m in by_model:
+                ratio = m["cost"] / total_cost
+                if ratio > 0.85 and len(by_model) > 1:
+                    anomalies.append({
+                        "type": "concentration_risk",
+                        "severity": "medium",
+                        "model": m["model"],
+                        "percent": f"{ratio * 100:.0f}%",
+                        "message": (
+                            f"'{m['model']}' accounts for {ratio * 100:.0f}% of all spending. "
+                            f"Diversify to reduce vendor lock-in risk."
+                        ),
+                    })
+
+        # 3. Accelerating spend (last 3 days vs first 3 days)
+        if len(costs) >= 6:
+            recent_avg = sum(costs[-3:]) / 3
+            older_avg = sum(costs[:3]) / 3
+            if older_avg > 0 and recent_avg > older_avg * 2:
+                anomalies.append({
+                    "type": "accelerating_spend",
+                    "severity": "high",
+                    "recent_daily_avg": round(recent_avg, 4),
+                    "older_daily_avg": round(older_avg, 4),
+                    "acceleration": f"{recent_avg / older_avg:.1f}x",
+                    "message": (
+                        f"Spending accelerating: recent ${recent_avg:.2f}/day vs earlier ${older_avg:.2f}/day "
+                        f"({recent_avg / older_avg:.1f}x increase). Are you being driven by emotion?"
+                    ),
+                })
+
+        # 4. Premium model creep
+        by_model_recent = self.tracker.get_by_model(3)
+        by_model_older = self.tracker.get_by_model(days)
+        recent_premium = sum(m["cost"] for m in by_model_recent if get_model_tier(m["model"]) == "premium")
+        recent_total = sum(m["cost"] for m in by_model_recent) or 0.01
+        older_premium = sum(m["cost"] for m in by_model_older if get_model_tier(m["model"]) == "premium")
+        older_total = sum(m["cost"] for m in by_model_older) or 0.01
+        if recent_premium / recent_total > older_premium / older_total + 0.2:
+            anomalies.append({
+                "type": "premium_creep",
+                "severity": "medium",
+                "message": (
+                    f"Premium model usage rising: {recent_premium / recent_total * 100:.0f}% recently "
+                    f"vs {older_premium / older_total * 100:.0f}% overall. "
+                    f"Review if premium quality is truly needed."
+                ),
+            })
+
+        if not anomalies:
+            anomalies.append({"type": "all_clear", "severity": "info", "message": "No anomalies detected. Spending patterns look healthy."})
+
+        return anomalies
+
     def generate_report(self, value_per_output: float = 0) -> dict:
         """Generate a comprehensive financial report."""
         return {
@@ -192,4 +352,6 @@ class CostAnalyzer:
             "efficiency": self.get_efficiency_score(),
             "prediction": self.predict_monthly_cost(),
             "savings_suggestions": self.get_savings_suggestions(),
+            "model_value_scores": self.get_model_value_scores(),
+            "anomalies": self.detect_anomalies(),
         }

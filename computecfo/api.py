@@ -24,33 +24,41 @@ def create_router(tracker: CostTracker = None,
     router = APIRouter(tags=["computecfo"])
 
     @router.get("/summary")
-    async def get_summary():
+    async def get_summary(project: str = ""):
         return {
-            "today": tracker.get_today(),
-            "week": tracker.get_this_week(),
-            "month": tracker.get_this_month(),
-            "projected_monthly": tracker.get_projected_monthly(),
+            "today": tracker.get_today(project=project),
+            "week": tracker.get_this_week(project=project),
+            "month": tracker.get_this_month(project=project),
+            "projected_monthly": tracker.get_projected_monthly(project=project),
         }
 
     @router.get("/by-module")
-    async def by_module(days: int = 30):
-        return tracker.get_by_module(days)
+    async def by_module(days: int = 30, project: str = ""):
+        return tracker.get_by_module(days, project=project)
 
     @router.get("/by-model")
-    async def by_model(days: int = 30):
-        return tracker.get_by_model(days)
+    async def by_model(days: int = 30, project: str = ""):
+        return tracker.get_by_model(days, project=project)
+
+    @router.get("/by-project")
+    async def by_project(days: int = 30):
+        return tracker.get_by_project(days)
 
     @router.get("/daily-trend")
-    async def daily_trend(days: int = 30):
-        return tracker.get_daily_trend(days)
+    async def daily_trend(days: int = 30, project: str = ""):
+        return tracker.get_daily_trend(days, project=project)
 
     @router.get("/recent")
-    async def recent(limit: int = 20):
-        return tracker.get_recent(limit)
+    async def recent(limit: int = 20, project: str = ""):
+        return tracker.get_recent(limit, project=project)
 
     @router.get("/budget")
     async def check_budget():
         return budget.check_all()
+
+    @router.get("/estimate")
+    async def estimate_cost(model: str, prompt: str = "", tokens: int = 0):
+        return budget.estimate_call_cost(model, prompt=prompt, estimated_input_tokens=tokens)
 
     @router.get("/roi")
     async def roi(value_per_output: float = 0):
@@ -67,6 +75,14 @@ def create_router(tracker: CostTracker = None,
     @router.get("/savings")
     async def savings():
         return analyzer.get_savings_suggestions()
+
+    @router.get("/model-values")
+    async def model_values(days: int = 30):
+        return analyzer.get_model_value_scores(days)
+
+    @router.get("/anomalies")
+    async def anomalies(days: int = 14):
+        return analyzer.detect_anomalies(days)
 
     @router.get("/report")
     async def full_report(value_per_output: float = 0):

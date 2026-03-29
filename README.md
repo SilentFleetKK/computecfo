@@ -1,12 +1,13 @@
-# 🏦 ComputeCFO — 算力财务官 — Your AI Financial Officer
+# 🏦 ComputeCFO — Your AI Financial Officer
 
-**Stop guessing your AI costs. Start managing them.**
+**Stop guessing your AI costs. Start managing them like a CFO.**
 
-ComputeCFO is a lightweight, zero-dependency Python library that tracks, analyzes, and optimizes your LLM API spending. Think of it as a CFO for your AI project — it watches every dollar, warns you before you overspend, and tells you how to save more.
+ComputeCFO is an AI Financial Officer Agent that tracks, analyzes, and optimizes your LLM API spending. It works both as a **standalone dashboard** and as a **Python library** you can integrate into any project. Inspired by Graham's value investing, Pacioli's double-entry bookkeeping, and Alphabet's independent accounting model.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
-![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-green)
+![Zero Dependencies](https://img.shields.io/badge/Core_Dependencies-Zero-green)
+![Version](https://img.shields.io/badge/Version-1.1.0-brightgreen)
 
 ## Why ComputeCFO?
 
@@ -16,10 +17,32 @@ Every AI developer eventually faces these questions:
 - 🤔 "Which feature is burning through my budget?"
 - 📉 "Am I getting good ROI on this AI investment?"
 - 🚨 "How do I prevent a $500 surprise bill?"
+- 🏢 "How much is each project costing independently?"
+- 🔍 "Is there an anomaly in my spending pattern?"
 
-ComputeCFO answers all of these with **3 lines of code**.
+ComputeCFO answers all of these — as a library with **3 lines of code**, or as a full dashboard with **1 command**.
 
 ## Quick Start
+
+### Option 1: Standalone Dashboard
+
+```bash
+pip install computecfo fastapi uvicorn
+python -m computecfo.server  # or: python server.py
+# Open http://localhost:8878
+```
+
+The dashboard provides real-time cost monitoring with:
+- Financial overview with daily/weekly/monthly summaries
+- Interactive spending trend charts
+- Model value scoring (Graham-inspired)
+- Project-level independent accounting
+- Anomaly detection ("Mr. Market" alarm)
+- Pre-call cost estimator
+- Dark/Light theme toggle
+- Chinese/English language switch
+
+### Option 2: Python Library
 
 ```bash
 pip install computecfo
@@ -33,25 +56,63 @@ tracker = CostTracker()
 # Record an API call (after your Claude/OpenAI/Gemini call)
 tracker.record("claude-sonnet-4-20250514",
                input_tokens=1500, output_tokens=500,
-               module="chatbot", action="respond")
+               module="chatbot", action="respond",
+               project="my-saas")
 
 # Check spending
 print(tracker.get_today())
 # {'cost': 0.012, 'calls': 1, 'total_tokens': 2000, ...}
 ```
 
-That's it. ComputeCFO auto-calculates cost, stores in SQLite, and you're tracking.
-
 ## Features
 
 ### 💰 Cost Tracking
 ```python
-tracker.get_today()           # Today's spending
-tracker.get_this_month()      # Monthly total
-tracker.get_by_module()       # Cost per feature
-tracker.get_by_model()        # Cost per model
-tracker.get_daily_trend(30)   # 30-day chart data
-tracker.get_recent(20)        # Last 20 API calls
+tracker.get_today()                      # Today's spending
+tracker.get_this_month()                 # Monthly total
+tracker.get_by_module()                  # Cost per feature
+tracker.get_by_model()                   # Cost per model
+tracker.get_by_project()                 # Cost per project
+tracker.get_daily_trend(30)              # 30-day chart data
+tracker.get_recent(20)                   # Last 20 API calls
+tracker.get_projected_monthly()          # Projected monthly cost
+
+# All query methods support project filtering:
+tracker.get_today(project="my-saas")
+tracker.get_by_model(project="internal-tools")
+```
+
+### 🎯 @track_cost Decorator
+```python
+from computecfo import CostTracker, track_cost
+
+tracker = CostTracker()
+
+@track_cost(tracker, module="chatbot", action="respond", project="my-saas")
+def ask_claude(prompt):
+    response = anthropic.messages.create(
+        model="claude-sonnet-4-20250514",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response
+
+# Cost is automatically recorded — works with Anthropic, OpenAI, and dict responses
+result = ask_claude("Hello!")
+```
+
+Supports sync and async functions, with auto-detection for Anthropic and OpenAI response formats.
+
+### 🏢 Multi-Project Accounting
+```python
+# Alphabet-style independent cost tracking per project
+tracker.record("claude-opus-4-20250514", 2000, 800,
+               module="search", project="google-search")
+tracker.record("gpt-4o", 1500, 600,
+               module="vision", project="waymo")
+
+# Independent P&L per project
+for p in tracker.get_by_project():
+    print(f"{p['project']}: ${p['cost']:.2f}")
 ```
 
 ### 🚨 Budget Controls
@@ -71,7 +132,6 @@ budget = BudgetManager(tracker, config)
 check = budget.pre_call_check("claude-opus-4-20250514")
 if check["approved"]:
     model = check["model"]  # might be downgraded to sonnet!
-    # make your API call with `model`
 else:
     print(f"Blocked: {check['reason']}")
 ```
@@ -79,27 +139,60 @@ else:
 **Three protection levels:**
 | Level | Trigger | Action |
 |-------|---------|--------|
-| ⚠️ Warning | 80% of budget | Log warning |
-| 🔴 Critical | 100% of budget | Auto-downgrade model |
-| 🚨 Circuit Break | 150% of budget | Block all API calls |
+| Warning | 80% of budget | Log warning |
+| Critical | 100% of budget | Auto-downgrade model |
+| Circuit Break | 150% of budget | Block all API calls |
 
-### 📊 ROI Analysis
+### 🧮 Pre-Call Cost Estimation
+```python
+from computecfo.models import estimate_tokens
+
+# Know the cost before you spend — Margin of Safety
+estimate = budget.estimate_call_cost(
+    model="claude-opus-4-20250514",
+    prompt="Analyze this codebase and suggest improvements..."
+)
+print(f"Estimated cost: ${estimate['estimated_cost']:.4f}")
+print(f"Budget remaining: ${estimate['budget_remaining']:.2f}")
+if estimate.get("cheaper_alternative"):
+    print(f"Try {estimate['cheaper_alternative']} instead")
+```
+
+### 📊 Model Value Scoring
 ```python
 from computecfo import CostAnalyzer
 
 analyzer = CostAnalyzer(tracker)
 
-# How efficient is your spending?
-efficiency = analyzer.get_efficiency_score()
-# {'score': 78, 'grade': 'B', 'deductions': [...]}
+# Graham-inspired value analysis — find the "undervalued" models
+for score in analyzer.get_model_value_scores():
+    print(f"{score['model']}: {score['grade']} "
+          f"(value: {score['value_score']}/100) — {score['recommendation']}")
+```
 
-# What should you optimize?
-suggestions = analyzer.get_savings_suggestions()
-# [{'priority': 'high', 'suggestion': 'Premium models account for 70% of spending...'}]
+### 🔍 Anomaly Detection
+```python
+# "Mr. Market" alarm — detect irrational spending patterns
+anomalies = analyzer.detect_anomalies()
+for a in anomalies:
+    print(f"[{a['severity']}] {a['type']}: {a['message']}")
+# [high] spending_spike: Spending on 2025-01-15 was 3.2x above average
+# [medium] premium_creep: Premium model usage increased from 20% to 65%
+```
 
-# Cost prediction
-prediction = analyzer.predict_monthly_cost()
-# {'projected_monthly': 45.20, 'direction': 'stable', 'confidence': 'high'}
+### 🔔 Webhook Alerts
+```python
+from computecfo import AlertManager, AlertConfig, create_budget_callbacks
+
+alerts = AlertManager(AlertConfig(
+    slack_webhook="https://hooks.slack.com/services/...",
+    discord_webhook="https://discord.com/api/webhooks/...",
+))
+
+# Connect to budget system
+callbacks = create_budget_callbacks(alerts)
+budget = BudgetManager(tracker, config, callbacks=callbacks)
+# Now you get Slack/Discord alerts on budget warnings, critical, and circuit breaks
 ```
 
 ### 🔌 FastAPI Integration
@@ -112,15 +205,22 @@ app = FastAPI()
 tracker = CostTracker()
 app.include_router(create_router(tracker), prefix="/api/cost")
 
-# Now you have 11 endpoints:
-# GET /api/cost/summary
+# 14 endpoints available:
+# GET /api/cost/summary?days=7&project=my-saas
+# GET /api/cost/by-module
+# GET /api/cost/by-model
+# GET /api/cost/by-project
+# GET /api/cost/daily-trend
+# GET /api/cost/recent
 # GET /api/cost/budget
+# GET /api/cost/estimate
 # GET /api/cost/roi
 # GET /api/cost/efficiency
-# GET /api/cost/savings
 # GET /api/cost/prediction
-# GET /api/cost/report    ← full comprehensive report
-# ...and more
+# GET /api/cost/savings
+# GET /api/cost/model-values
+# GET /api/cost/anomalies
+# GET /api/cost/report
 ```
 
 ## Supported Models
@@ -143,32 +243,64 @@ MODEL_PRICING["my-custom-model"] = {"input": 2.0, "output": 8.0, "provider": "cu
 ## Architecture
 
 ```
-┌──────────────┐
-│  Your App    │
-│  (API calls) │
-└──────┬───────┘
-       │ tracker.record(...)
-       ▼
-┌──────────────┐     ┌──────────────┐
-│  ComputeCFO   │────▶│   SQLite     │
-│  Core        │     │   (~/.computecfo/usage.db)
-├──────────────┤     └──────────────┘
-│ CostTracker  │ — record, query, trend
-│ BudgetManager│ — limits, alerts, circuit breaker
-│ CostAnalyzer │ — ROI, efficiency, prediction
-│ FastAPI API  │ — drop-in router (optional)
-└──────────────┘
+┌──────────────────────────────────────────┐
+│           ComputeCFO Agent               │
+├──────────────────────────────────────────┤
+│                                          │
+│  ┌─────────────┐   ┌─────────────────┐  │
+│  │ Dashboard UI │   │ FastAPI Server  │  │
+│  │ (HTML/JS/CSS)│◀─▶│ (server.py)     │  │
+│  │ Chart.js     │   │ 14 REST APIs    │  │
+│  │ i18n (中/EN) │   └────────┬────────┘  │
+│  │ Dark/Light   │            │           │
+│  └─────────────┘            ▼           │
+│              ┌──────────────────────┐    │
+│              │    Core Engine       │    │
+│              ├──────────────────────┤    │
+│              │ CostTracker  — track │    │
+│              │ BudgetManager— guard │    │
+│              │ CostAnalyzer — score │    │
+│              │ AlertManager — alert │    │
+│              │ @track_cost  — auto  │    │
+│              └──────────┬───────────┘    │
+│                         ▼               │
+│              ┌──────────────────────┐    │
+│              │  SQLite              │    │
+│              │  ~/.computecfo/      │    │
+│              │  usage.db            │    │
+│              └──────────────────────┘    │
+├──────────────────────────────────────────┤
+│  Zero core dependencies │ Python 3.10+  │
+└──────────────────────────────────────────┘
 ```
+
+## Dashboard
+
+The standalone dashboard provides a full financial overview with interactive charts.
+
+**Features:**
+- Real-time spending summaries (today / week / month / projected)
+- Daily spending trend line chart
+- Cost breakdown by model (doughnut chart)
+- Project-level P&L with bar chart
+- Model value scoring table (Graham-inspired grades A-F)
+- Anomaly detection alerts
+- Pre-call cost estimator
+- Recent activity log
+- Budget controls with 3-level protection
+- Dark / Light theme toggle
+- Chinese / English language switch
+- Auto-refresh every 30 seconds
 
 ## Zero Dependencies
 
 ComputeCFO's core uses only Python standard library + SQLite. No external packages required.
 
-Optional: Install `fastapi` for the API router, or `uvicorn` to serve it.
+Optional: Install `fastapi` + `uvicorn` for the dashboard and API server.
 
 ## Examples
 
-See [`examples/quickstart.py`](examples/quickstart.py) for a complete walkthrough.
+See [`examples/quickstart.py`](examples/quickstart.py) for a complete walkthrough covering all features.
 
 ## Use Cases
 
@@ -177,14 +309,7 @@ See [`examples/quickstart.py`](examples/quickstart.py) for a complete walkthroug
 - **Code Assistant** — Budget controls for team usage, per-developer tracking
 - **Research Agent** — Monitor long-running agent costs, prevent runaway spending
 - **Multi-Model Pipeline** — Compare provider costs, find the cheapest sufficient model
-
-## Roadmap
-
-- [ ] Webhook alerts (Slack, Discord, email)
-- [ ] Multi-tenant support (per-user budgets)
-- [ ] Dashboard UI (React component)
-- [ ] Prometheus metrics exporter
-- [ ] Cost anomaly detection (ML-based)
+- **Multi-Project Organization** — Independent P&L per project, Alphabet-style
 
 ## Contributing
 
