@@ -1,6 +1,6 @@
 """
 🔔 Alerts — Multi-channel webhook notifications.
-Supports Slack, Discord, generic webhooks, and custom handlers.
+Supports Slack, Discord, Telegram Bot, generic webhooks, and custom handlers.
 Uses only stdlib (urllib) — zero external dependencies.
 """
 import json
@@ -18,6 +18,8 @@ class AlertConfig:
     """Configuration for alert channels."""
     slack_webhook: str = ""          # Slack incoming webhook URL
     discord_webhook: str = ""        # Discord webhook URL
+    telegram_bot_token: str = ""     # Telegram Bot API token (from @BotFather)
+    telegram_chat_id: str = ""       # Telegram chat/group/channel ID
     custom_webhooks: list[str] = field(default_factory=list)  # Generic webhook URLs
     custom_handler: Optional[Callable] = None  # Custom callback function
     enabled: bool = True
@@ -47,6 +49,9 @@ class AlertManager:
 
         if self.config.discord_webhook:
             self._send_discord(level, message, data)
+
+        if self.config.telegram_bot_token and self.config.telegram_chat_id:
+            self._send_telegram(level, message, data)
 
         for url in self.config.custom_webhooks:
             self._send_generic(url, level, message, data)
@@ -96,6 +101,26 @@ class AlertManager:
 
         payload = {"embeds": [embed]}
         self._post(self.config.discord_webhook, payload, "Discord")
+
+    def _send_telegram(self, level: str, message: str, data: dict = None):
+        """Send alert to Telegram via Bot API."""
+        emoji = {"warning": "\u26a0\ufe0f", "critical": "\U0001f534", "circuit_break": "\U0001f6a8"}.get(level, "\u2139\ufe0f")
+        lines = [f"{emoji} *ComputeCFO {level.upper()}*", "", message]
+        if data and self.config.include_details:
+            lines.append("")
+            for k, v in data.items():
+                if k != "status":
+                    lines.append(f"\u2022 *{k}*: `{v}`")
+
+        text = "\n".join(lines)
+        url = (f"https://api.telegram.org/bot{self.config.telegram_bot_token}"
+               f"/sendMessage")
+        payload = {
+            "chat_id": self.config.telegram_chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+        }
+        self._post(url, payload, "Telegram")
 
     def _send_generic(self, url: str, level: str, message: str, data: dict = None):
         """Send alert to a generic webhook (POST JSON)."""

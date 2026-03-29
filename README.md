@@ -185,8 +185,11 @@ for a in anomalies:
 from computecfo import AlertManager, AlertConfig, create_budget_callbacks
 
 alerts = AlertManager(AlertConfig(
-    slack_webhook="https://hooks.slack.com/services/...",
-    discord_webhook="https://discord.com/api/webhooks/...",
+    telegram_bot_token="123456:ABC-DEF...",  # from @BotFather
+    telegram_chat_id="-1001234567890",       # your chat/group/channel ID
+    # Also supports:
+    # slack_webhook="https://hooks.slack.com/services/...",
+    # discord_webhook="https://discord.com/api/webhooks/...",
 ))
 
 # Connect to budget system
